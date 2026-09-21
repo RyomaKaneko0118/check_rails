@@ -26,7 +26,22 @@ Rails.application.configure do
   end
 
   # Change to :null_store to avoid any caching.
-  config.cache_store = :memory_store
+  # 接続先は config/redis.yml が環境・用途ごとに決める (development のキャッシュは db 0)。
+  config.cache_store = :redis_cache_store, {
+    url: Rails.application.config_for(:redis)[:cache_url],
+    # キャッシュは「速いか、無いか」のどちらかであるべきなので、既定 (1 秒) より短く切る。
+    # 待たされるくらいならミス扱いにして計算し直した方が総合的に速い。
+    connect_timeout: 1,
+    read_timeout: 0.2,
+    write_timeout: 0.2,
+    reconnect_attempts: 1,
+    pool: { size: ENV.fetch("RAILS_MAX_THREADS", 5).to_i },
+    # 既定のハンドラでも接続断は握りつぶされる (read は nil、fetch はブロックに
+    # フォールバック) が、ログに埋もれるのでエラートラッカーへ送る。
+    error_handler: ->(method:, returning:, exception:) {
+      Rails.error.report(exception, handled: true, context: { method: method, returning: returning })
+    }
+  }
 
   # Store uploaded files on the local file system (see config/storage.yml for options).
   config.active_storage.service = :local

@@ -1,7 +1,7 @@
 # Redis (Valkey) 構成メモ
 
-キャッシュ・Action Cable・ジョブのバックエンドとして Redis を使うための土台の解説。
-**現時点では接続の土台だけが入っており、`Rails.cache` などの切り替えはまだ行っていない**（[未実装](#未実装-次のステップ)を参照）。
+キャッシュ・Action Cable・ジョブのバックエンドとして Redis を使うための構成の解説。
+**現時点で Redis に載っているのは `Rails.cache` のみ**で、Action Cable とジョブは未着手（[未実装](#未実装-次のステップ)を参照）。
 
 ## 全体像
 
@@ -9,6 +9,7 @@
 | --- | --- |
 | `compose.yaml` | `redis` サービス（Valkey）の定義と、`web` への `REDIS_HOST` 受け渡し |
 | `config/redis.yml` | 環境・用途ごとの接続先（DB 番号）の決定 |
+| `config/environments/*.rb` | `Rails.cache` のストア設定 |
 | `Gemfile` | `redis` ゲム（`Rails.cache` と Action Cable の redis アダプタが要求する） |
 | `.github/workflows/ci.yml` | `test` / `system-test` ジョブの `redis` サービス |
 
@@ -153,20 +154,44 @@ Redis.new        # => Redis::CannotConnectError: Connection refused - 127.0.0.1:
 
 なお、アプリコードから直接 `Redis.new` を呼ぶ機会は実際にはほとんどない（`Rails.cache` と Action Cable は設定側で URL を受け取るため）。ヘルパを用意するかどうかは、直接叩く用途が出てきてから判断する。
 
-## 未実装 / 次のステップ
+## `Rails.cache`
 
-現状は接続の土台のみで、アプリの挙動は Redis 導入前と変わらない。
+development / production を `:redis_cache_store` にしてある（**test は `:null_store` のまま**）。
+
+```ruby
+config.cache_store = :redis_cache_store, {
+  url: Rails.application.config_for(:redis)[:cache_url],
+  connect_timeout: 1,
+  read_timeout: 0.2,
+  write_timeout: 0.2,
+  reconnect_attempts: 1,
+  pool: { size: ENV.fetch("RAILS_MAX_THREADS", 5).to_i },
+  error_handler: ->(method:, returning:, exception:) {
+    Rails.error.report(exception, handled: true, context: { method: method, returning: returning })
+  }
+}
+```
+
+- **タイムアウトを既定より短くしている。** 既定は read/write とも 1 秒だが、キャッシュは「速いか、無いか」のどちらかであるべきで、待たされるくらいならミス扱いにして計算し直した方が総合的に速い。
+- **`pool` は Puma のスレッド数（`RAILS_MAX_THREADS`）に合わせる。** `Rails.cache.redis` は `ConnectionPool` なので、生の接続に触るには `Rails.cache.redis.with { |c| ... }` を使う。
+- **`error_handler` は縮退のためではない。** `RedisCacheStore` は既定のハンドラが接続例外を握ってログに落とすので、未指定でも Redis 断でアプリは止まらない（`read` は `nil`、`fetch` はブロックにフォールバック）。明示しているのは、その障害をログに埋もれさせずエラートラッカーへ送るため。
+- **test を `:null_store` のままにした理由。** テスト間でキャッシュが漏れる事故の方が、キャッシュ経路を常時テストする利益より大きい。キャッシュ自体を検証したいテストでのみ個別に差し替える。
+
+```ruby
+Rails.cache.class                                # => ActiveSupport::Cache::RedisCacheStore
+Rails.cache.redis.with { |c| c.connection[:db] } # => 0
+Rails.cache.fetch(:probe) { "computed" }         # => "computed"
+```
+
+## 未実装 / 次のステップ
 
 | | 現状 |
 | --- | --- |
-| `Rails.cache` | development: `:memory_store` / test: `:null_store` / production: 未設定 |
+| `Rails.cache` | **Redis 済み**（dev: db 0 / prod: db 0 / test: `:null_store`） |
 | Action Cable | development: `async` / production: `cable.yml` は `ENV["REDIS_URL"]` 参照のまま |
 | ジョブ | Active Job のアダプタ未設定。`solid_queue` は Gemfile にあるが未インストール |
 
-切り替える場合の要点。
+1. **Action Cable** — `cable.yml` の production が今も `ENV.fetch("REDIS_URL")` を見ており、この構成では未解決の参照（`localhost:6379` にフォールバックする）。`cable_url` 参照に直す残務がある。ただし複数プロセスで配信する必要が出るまで development は `async` で十分。
+2. **ジョブ** — Redis に載せるなら Sidekiq、DB に載せるなら Solid Queue。ジョブは消失が致命的な一方 Redis の永続化運用は DB より手間がかかるので、秒間数百ジョブ級が見えるまでは Solid Queue が無難。
 
-1. **`Rails.cache`** — `config.cache_store = :redis_cache_store, { url: Rails.application.config_for(:redis)[:cache_url], error_handler: ... }`。`RedisCacheStore` は既定のエラーハンドラが接続例外を握ってログに落とすため、Redis が落ちてもアプリは止まらない（`read` は `nil`、`fetch` はブロックにフォールバック）。`error_handler` を明示するのは、その障害をログに埋もれさせずエラートラッカーへ送るため。test は `:null_store` のままにしてテスト間の汚染を避ける。
-2. **Action Cable** — `cable.yml` の production の `ENV.fetch("REDIS_URL")` を `cable_url` 参照に直す。ただし複数プロセスで配信する必要が出るまで development は `async` で十分。
-3. **ジョブ** — Redis に載せるなら Sidekiq、DB に載せるなら Solid Queue。ジョブは消失が致命的な一方 Redis の永続化運用は DB より手間がかかるので、秒間数百ジョブ級が見えるまでは Solid Queue が無難。
-
-`solid_cache` / `solid_cable` / `solid_queue` は Gemfile に残っているが未インストール（`config/cache.yml` などが無く、マイグレーションも無い）。Redis に寄せる範囲が決まったら、使わないものは Gemfile と `config/database.yml` の production ブロック（`cache:` / `queue:` / `cable:`）から外す。
+`solid_cache` / `solid_cable` / `solid_queue` は Gemfile に残っているが未インストール（`config/cache.yml` などが無く、マイグレーションも無い）。キャッシュを Redis にした以上 `solid_cache` は使わないので、Gemfile と `config/database.yml` の production の `cache:` ブロックから外せる。

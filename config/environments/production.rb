@@ -47,7 +47,21 @@ Rails.application.configure do
   config.active_support.report_deprecations = false
 
   # Replace the default in-process memory cache store with a durable alternative.
-  # config.cache_store = :mem_cache_store
+  config.cache_store = :redis_cache_store, {
+    url: Rails.application.config_for(:redis)[:cache_url],
+    # キャッシュは「速いか、無いか」のどちらかであるべきなので、既定 (1 秒) より短く切る。
+    # 待たされるくらいならミス扱いにして計算し直した方が総合的に速い。
+    connect_timeout: 1,
+    read_timeout: 0.2,
+    write_timeout: 0.2,
+    reconnect_attempts: 1,
+    pool: { size: ENV.fetch("RAILS_MAX_THREADS", 5).to_i },
+    # 既定のハンドラでも接続断は握りつぶされる (read は nil、fetch はブロックに
+    # フォールバック) が、ログに埋もれるのでエラートラッカーへ送る。
+    error_handler: ->(method:, returning:, exception:) {
+      Rails.error.report(exception, handled: true, context: { method: method, returning: returning })
+    }
+  }
 
   # Replace the default in-process and non-durable queuing backend for Active Job.
   # config.active_job.queue_adapter = :resque
