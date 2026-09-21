@@ -165,7 +165,7 @@ Redis.new        # => Redis::CannotConnectError: Connection refused - 127.0.0.1:
 
 切り替える場合の要点。
 
-1. **`Rails.cache`** — `config.cache_store = :redis_cache_store, { url: Rails.application.config_for(:redis)[:cache_url], error_handler: ... }`。`error_handler` は必須と考えてよい。Redis 断でアプリ全体が落ちず縮退運転できる点が、DB バックエンドの solid_cache との運用上の最大の違いになる。test は `:null_store` のままにしてテスト間の汚染を避ける。
+1. **`Rails.cache`** — `config.cache_store = :redis_cache_store, { url: Rails.application.config_for(:redis)[:cache_url], error_handler: ... }`。`RedisCacheStore` は既定のエラーハンドラが接続例外を握ってログに落とすため、Redis が落ちてもアプリは止まらない（`read` は `nil`、`fetch` はブロックにフォールバック）。`error_handler` を明示するのは、その障害をログに埋もれさせずエラートラッカーへ送るため。test は `:null_store` のままにしてテスト間の汚染を避ける。
 2. **Action Cable** — `cable.yml` の production の `ENV.fetch("REDIS_URL")` を `cable_url` 参照に直す。ただし複数プロセスで配信する必要が出るまで development は `async` で十分。
 3. **ジョブ** — Redis に載せるなら Sidekiq、DB に載せるなら Solid Queue。ジョブは消失が致命的な一方 Redis の永続化運用は DB より手間がかかるので、秒間数百ジョブ級が見えるまでは Solid Queue が無難。
 
