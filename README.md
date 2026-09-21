@@ -71,3 +71,6 @@ http://localhost:3000
 - `DATABASE_URL` は使わない。Rails では全環境の設定を上書きするため、`RAILS_ENV=test`
   でのテスト実行が development の DB を破壊する。接続情報は部品で渡し、DB 名は
   `config/database.yml` が環境ごとに決める
+- 同じ理由で `REDIS_URL` も使わない。`redis` ゲムが暗黙に拾うため、渡すのは
+  `REDIS_HOST` だけにし、DB 番号は `config/redis.yml` が環境・用途ごとに決める
+  → [doc/redis.md](doc/redis.md)

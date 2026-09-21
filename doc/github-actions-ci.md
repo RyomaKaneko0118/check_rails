@@ -131,7 +131,19 @@ run: bin/rails db:test:prepare test
 
 `DATABASE_URL` が `config/database.yml` の設定より優先されるため、開発環境（compose の `db` ホスト）とは別に CI 用の接続先を指定できる。`db:test:prepare` はテスト用 DB を作成しスキーマを流し込み、その後 `test` が Minitest を実行する。
 
-コメントアウトされている `redis` サービスと `REDIS_URL` / `RAILS_MASTER_KEY` は、Redis を使い始めたときや暗号化された credentials をテストで読む必要が出たときに有効化する枠。現状このアプリのキャッシュ・ジョブ・Action Cable は solid_cache / solid_queue / solid_cable によって DB 上で動くので、Redis は不要になっている。
+`postgres` と並んで `redis` サービス（Valkey）も立ち上がる。
+
+```yaml
+  redis:
+    image: valkey/valkey:9.1.2-trixie
+    ports:
+      - 6379:6379
+    options: --health-cmd "valkey-cli ping" --health-interval 10s --health-timeout 5s --health-retries 5
+```
+
+ヘルスチェックが `redis-cli` ではなく `valkey-cli` なのは、Valkey イメージに `redis-cli` が入っていないため。アプリへは `REDIS_URL` ではなく `REDIS_HOST: localhost` だけを渡し、DB 番号は `config/redis.yml` が `RAILS_ENV` から決める（CI 用に URL を書き分ける必要がない）。詳細は [Redis (Valkey) 構成メモ](redis.md) を参照。
+
+`RAILS_MASTER_KEY` はコメントアウトされたまま。暗号化された credentials をテストで読む必要が出たときに有効化する枠。
 
 ## system-test — ブラウザテスト
 
