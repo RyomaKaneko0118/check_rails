@@ -1,7 +1,7 @@
 # Redis (Valkey) 構成メモ
 
 キャッシュ・Action Cable・ジョブのバックエンドとして Redis を使うための構成の解説。
-**現時点で Redis に載っているのは `Rails.cache` と（production の）Action Cable** で、ジョブは未着手（[未実装](#未実装-次のステップ)を参照）。
+`Rails.cache`（db 0）、Action Cable（db 1、production のみ）、ジョブ（db 2、Sidekiq）が Redis 上で動く。
 
 ## 全体像
 
@@ -228,14 +228,12 @@ ActionCable.server.config.cable
 #     "channel_prefix" => "check_rails_production"}
 ```
 
-## 未実装 / 次のステップ
+## 現状と残りの整理
 
-| | 現状 |
+| | 状態 |
 | --- | --- |
 | `Rails.cache` | **Redis 済み**（dev: db 0 / prod: db 0 / test: `:null_store`） |
 | Action Cable | **production は Redis 済み**（db 1） / development: `async`（意図的） |
-| ジョブ | Active Job のアダプタ未設定。`solid_queue` は Gemfile にあるが未インストール |
+| ジョブ | **Redis 済み**（db 2、Sidekiq） → [doc/jobs.md](jobs.md) |
 
-1. **ジョブ** — Redis に載せるなら Sidekiq、DB に載せるなら Solid Queue。ジョブは消失が致命的な一方 Redis の永続化運用は DB より手間がかかるので、秒間数百ジョブ級が見えるまでは Solid Queue が無難。
-
-`solid_cache` / `solid_cable` / `solid_queue` は Gemfile に残っているが未インストール（`config/cache.yml` などが無く、マイグレーションも無い）。キャッシュと Action Cable を Redis にした以上 `solid_cache` と `solid_cable` は使わないので、Gemfile と `config/database.yml` の production の `cache:` / `cable:` ブロックから外せる。`solid_queue` はジョブの方針が決まるまで残す。
+`solid_queue` は Sidekiq に置き換えたので Gemfile から外した。`solid_cache` と `solid_cable` は Gemfile に残っているだけで未インストールであり、キャッシュと Action Cable を Redis にした以上使わないので、Gemfile と `config/database.yml` の production の `cache:` / `cable:` ブロックから外せる。

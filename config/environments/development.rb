@@ -70,6 +70,10 @@ Rails.application.configure do
   # Highlight code that enqueued background job in logs.
   config.active_job.verbose_enqueue_logs = true
 
+  # ジョブは production と同じ Sidekiq で動かす。キューは Redis の db 2
+  # (config/redis.yml の queue_url)、処理は worker コンテナ。
+  config.active_job.queue_adapter = :sidekiq
+
   # Highlight code that triggered redirect in logs.
   config.action_dispatch.verbose_redirect_logs = true
 

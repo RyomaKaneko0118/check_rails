@@ -29,9 +29,18 @@ gem "tzinfo-data", platforms: %i[ windows jruby ]
 gem "redis", "~> 5.4"
 
 # Use the database-backed adapters for Rails.cache, Active Job, and Action Cable
+# ジョブは Sidekiq (Redis) を使うため solid_queue は入れない。
 gem "solid_cache"
-gem "solid_queue"
 gem "solid_cable"
+
+# Active Job のバックエンド。キューは Redis 上 (config/redis.yml の queue_url)
+gem "sidekiq", "~> 8.1"
+
+# json 3.0 は JSON.parse の options を位置引数で受け取らなくなったが、
+# activesupport 8.1.3.1 は位置引数で渡すため ActiveSupport::JSON.decode が壊れる。
+# アプリ全体の JSON デコードが影響を受ける (Active Job の引数を積んだ時点で露見した)。
+# 参照: activesupport-8.1.3.1/lib/active_support/json/decoding.rb:25
+gem "json", "~> 2.18"
 
 # Reduces boot times through caching; required in config/boot.rb
 gem "bootsnap", require: false

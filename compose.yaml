@@ -1,35 +1,45 @@
 name: check_rails
 
+# web と worker は同じイメージ・同じ環境で動く。違いは起動コマンドだけなので共通化する。
+x-app: &app
+  build:
+    context: .
+    args:
+      # バージョンは秘密ではなく、環境間でズレると困るのでここに固定する
+      RUBY_VERSION: "4.0.7"   # Ruby 最新安定版
+      NODE_VERSION: "26.9.0"  # Node.js 最新安定版 (Current)
+  volumes:
+    - .:/app
+    - bundle:/usr/local/bundle
+    - node_modules:/app/node_modules
+  environment:
+    # DATABASE_URL は全環境の設定を上書きし、test 実行時に development の DB を
+    # 破壊するため使わない。部品で渡し、DB 名は config/database.yml 側で決める。
+    POSTGRES_HOST: db
+    POSTGRES_USER: ${POSTGRES_USER}
+    POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+    # REDIS_URL は redis gem が暗黙に拾い、test が development のデータを壊すため使わない。
+    # ホストだけ渡し、DB 番号は config/redis.yml 側で環境・用途ごとに決める。
+    REDIS_HOST: redis
+    RAILS_ENV: ${RAILS_ENV:-development}
+    TZ: ${TZ:-Asia/Tokyo}
+  depends_on:
+    - db
+    - redis
+
 services:
   web:
-    build:
-      context: .
-      args:
-        # バージョンは秘密ではなく、環境間でズレると困るのでここに固定する
-        RUBY_VERSION: "4.0.7"   # Ruby 最新安定版
-        NODE_VERSION: "26.9.0"  # Node.js 最新安定版 (Current)
+    <<: *app
     ports:
       - "3000:3000"
-    volumes:
-      - .:/app
-      - bundle:/usr/local/bundle
-      - node_modules:/app/node_modules
-    environment:
-      # DATABASE_URL は全環境の設定を上書きし、test 実行時に development の DB を
-      # 破壊するため使わない。部品で渡し、DB 名は config/database.yml 側で決める。
-      POSTGRES_HOST: db
-      POSTGRES_USER: ${POSTGRES_USER}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
-      # REDIS_URL は redis gem が暗黙に拾い、test が development のデータを壊すため使わない。
-      # ホストだけ渡し、DB 番号は config/redis.yml 側で環境・用途ごとに決める。
-      REDIS_HOST: redis
-      RAILS_ENV: ${RAILS_ENV:-development}
-      TZ: ${TZ:-Asia/Tokyo}
-    depends_on:
-      - db
-      - redis
     tty: true
     stdin_open: true
+
+  # Sidekiq の worker。ジョブは Redis の db 2 に積まれるので、worker が落ちていても
+  # 積まれたジョブは残る (redis は --appendonly yes で永続化してある)。
+  worker:
+    <<: *app
+    command: ["bundle", "exec", "sidekiq"]
 
   db:
     image: postgres:18.6-trixie  # PostgreSQL 最新安定版
