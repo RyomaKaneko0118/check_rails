@@ -1,7 +1,7 @@
 # Redis (Valkey) 構成メモ
 
 キャッシュ・Action Cable・ジョブのバックエンドとして Redis を使うための構成の解説。
-**現時点で Redis に載っているのは `Rails.cache` のみ**で、Action Cable とジョブは未着手（[未実装](#未実装-次のステップ)を参照）。
+**現時点で Redis に載っているのは `Rails.cache` と（production の）Action Cable** で、ジョブは未着手（[未実装](#未実装-次のステップ)を参照）。
 
 ## 全体像
 
@@ -10,6 +10,7 @@
 | `compose.yaml` | `redis` サービス（Valkey）の定義と、`web` への `REDIS_HOST` 受け渡し |
 | `config/redis.yml` | 環境・用途ごとの接続先（DB 番号）の決定 |
 | `config/environments/*.rb` | `Rails.cache` のストア設定 |
+| `config/cable.yml` | Action Cable のアダプタ設定 |
 | `Gemfile` | `redis` ゲム（`Rails.cache` と Action Cable の redis アダプタが要求する） |
 | `.github/workflows/ci.yml` | `test` / `system-test` ジョブの `redis` サービス |
 
@@ -84,6 +85,21 @@ config = Rails.application.config_for(:redis)
 ```
 
 `REDIS_HOST` は秘密でもホスト依存でもないので `.env` には置かず、`compose.yaml` に直書きしてコミットする（バージョン番号と同じ扱い）。
+
+## `redis` ゲムのバージョン制約
+
+```ruby
+gem "redis", "~> 5.4"
+```
+
+**6 系は使えない。** Action Cable の redis アダプタ（`actioncable` 8.1.3.1）が `gem "redis", ">= 4", "< 6"` を宣言しているため、redis 6.0.0 が入っていると production 起動時に落ちる。
+
+```
+Error loading the 'redis' Action Cable pubsub adapter.
+can't activate redis (>= 4, < 6), already activated redis-6.0.0 (Gem::LoadError)
+```
+
+紛らわしいのは **`Rails.cache` は 6 系でも動く**こと（`ActiveSupport::Cache::RedisCacheStore` 側の宣言は `>= 4.0.1` で上限がない）。キャッシュだけ検証していると気づかず、Action Cable を使う production でだけ落ちる。バージョン無指定で `gem "redis"` と書くと 6 系が入るので、上限を明示している。
 
 ## CI
 
@@ -183,15 +199,43 @@ Rails.cache.redis.with { |c| c.connection[:db] } # => 0
 Rails.cache.fetch(:probe) { "computed" }         # => "computed"
 ```
 
+## Action Cable
+
+```yaml
+development:
+  adapter: async
+
+test:
+  adapter: test
+
+production:
+  adapter: redis
+  url: <%= Rails.application.config_for(:redis)[:cable_url] %>
+  channel_prefix: check_rails_production
+```
+
+- **development / test は Redis を使わない。** 単一プロセスで完結する限り `async` で足りるので、開発に Redis 稼働を必須にしない。複数プロセス・複数コンテナで配信する必要が出た時点で `adapter: redis` + `cable_url`（db 1）に変える。
+- production は `rails new` 既定の `ENV.fetch("REDIS_URL") { "redis://localhost:6379/1" }` から `config_for` 参照に置き換えた。既定のままだと `REDIS_URL` を渡さないこの構成では `localhost:6379` に繋ぎに行って失敗する。
+- `channel_prefix` も既定の `app_production` からアプリ名に直してある。同じ Redis を他アプリと共有した場合にチャンネル名が衝突しないようにするための接頭辞。
+- cable.yml は Action Cable の初期化時に読まれるので、ERB から `Rails.application.config_for` を呼べる。
+
+確認は環境ごとに `ActionCable.server.config.cable` を見る。
+
+```ruby
+# RAILS_ENV=production
+ActionCable.server.config.cable
+# => {"adapter" => "redis", "url" => "redis://redis:6379/1",
+#     "channel_prefix" => "check_rails_production"}
+```
+
 ## 未実装 / 次のステップ
 
 | | 現状 |
 | --- | --- |
 | `Rails.cache` | **Redis 済み**（dev: db 0 / prod: db 0 / test: `:null_store`） |
-| Action Cable | development: `async` / production: `cable.yml` は `ENV["REDIS_URL"]` 参照のまま |
+| Action Cable | **production は Redis 済み**（db 1） / development: `async`（意図的） |
 | ジョブ | Active Job のアダプタ未設定。`solid_queue` は Gemfile にあるが未インストール |
 
-1. **Action Cable** — `cable.yml` の production が今も `ENV.fetch("REDIS_URL")` を見ており、この構成では未解決の参照（`localhost:6379` にフォールバックする）。`cable_url` 参照に直す残務がある。ただし複数プロセスで配信する必要が出るまで development は `async` で十分。
-2. **ジョブ** — Redis に載せるなら Sidekiq、DB に載せるなら Solid Queue。ジョブは消失が致命的な一方 Redis の永続化運用は DB より手間がかかるので、秒間数百ジョブ級が見えるまでは Solid Queue が無難。
+1. **ジョブ** — Redis に載せるなら Sidekiq、DB に載せるなら Solid Queue。ジョブは消失が致命的な一方 Redis の永続化運用は DB より手間がかかるので、秒間数百ジョブ級が見えるまでは Solid Queue が無難。
 
-`solid_cache` / `solid_cable` / `solid_queue` は Gemfile に残っているが未インストール（`config/cache.yml` などが無く、マイグレーションも無い）。キャッシュを Redis にした以上 `solid_cache` は使わないので、Gemfile と `config/database.yml` の production の `cache:` ブロックから外せる。
+`solid_cache` / `solid_cable` / `solid_queue` は Gemfile に残っているが未インストール（`config/cache.yml` などが無く、マイグレーションも無い）。キャッシュと Action Cable を Redis にした以上 `solid_cache` と `solid_cable` は使わないので、Gemfile と `config/database.yml` の production の `cache:` / `cable:` ブロックから外せる。`solid_queue` はジョブの方針が決まるまで残す。
