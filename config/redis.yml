@@ -1,0 +1,33 @@
+# 接続情報は compose.yaml の environment から受け取る。
+# REDIS_URL は使わない (redis gem が Redis.new 時に暗黙で拾うため、RAILS_ENV=test での
+# 実行が development のキャッシュを参照・破壊する)。DB 番号はこのファイルが
+# 環境ごと・用途ごとに決める。
+#
+# 参照は Rails.application.config_for(:redis) 。initializer より前に評価されるので、
+# config.cache_store のように environment ファイルで必要になる設定にも間に合う。
+<%
+  host = ENV.fetch("REDIS_HOST", "redis")
+  port = ENV.fetch("REDIS_PORT", "6379")
+%>
+default: &default
+  host: <%= host %>
+  port: <%= port %>
+
+development:
+  <<: *default
+  cache_url: redis://<%= host %>:<%= port %>/0
+  cable_url: redis://<%= host %>:<%= port %>/1
+  queue_url: redis://<%= host %>:<%= port %>/2
+
+# test は development と同じ DB 番号にしないこと (テスト実行で開発中のデータが消える)。
+test:
+  <<: *default
+  cache_url: redis://<%= host %>:<%= port %>/10
+  cable_url: redis://<%= host %>:<%= port %>/11
+  queue_url: redis://<%= host %>:<%= port %>/12
+
+production:
+  <<: *default
+  cache_url: redis://<%= host %>:<%= port %>/0
+  cable_url: redis://<%= host %>:<%= port %>/1
+  queue_url: redis://<%= host %>:<%= port %>/2

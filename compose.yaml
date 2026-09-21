@@ -20,10 +20,14 @@ services:
       POSTGRES_HOST: db
       POSTGRES_USER: ${POSTGRES_USER}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      # REDIS_URL は redis gem が暗黙に拾い、test が development のデータを壊すため使わない。
+      # ホストだけ渡し、DB 番号は config/redis.yml 側で環境・用途ごとに決める。
+      REDIS_HOST: redis
       RAILS_ENV: ${RAILS_ENV:-development}
       TZ: ${TZ:-Asia/Tokyo}
     depends_on:
       - db
+      - redis
     tty: true
     stdin_open: true
 
@@ -39,7 +43,18 @@ services:
       # PostgreSQL 18 から VOLUME が /var/lib/postgresql/data → /var/lib/postgresql に変更
       - pgdata:/var/lib/postgresql
 
+  redis:
+    image: valkey/valkey:9.1.2-trixie  # Valkey 最新安定版 (Redis 互換, BSD ライセンス)
+    command: ["valkey-server", "--appendonly", "yes"]
+    environment:
+      TZ: ${TZ:-Asia/Tokyo}
+    ports:
+      - "6379:6379"
+    volumes:
+      - redisdata:/data
+
 volumes:
   bundle:
   node_modules:
   pgdata:
+  redisdata:
