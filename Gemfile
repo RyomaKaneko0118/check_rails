@@ -26,7 +26,7 @@ gem "tzinfo-data", platforms: %i[ windows jruby ]
 # Redis (Valkey) client for Rails.cache and the Action Cable redis adapter
 # 6 系は使えない。Action Cable の redis アダプタが ">= 4, < 6" を要求しており、
 # 6.0.0 だと production 起動時に Gem::LoadError になる (RedisCacheStore 側に上限はない)。
-gem "redis", "~> 5.4"
+gem "redis", "~> 6.0"
 
 # Use the database-backed adapters for Rails.cache, Active Job, and Action Cable
 # ジョブは Sidekiq (Redis) を使うため solid_queue は入れない。
